@@ -1,0 +1,62 @@
+### Integrative multi-omics analysis of GBM cells ###
+# study: https://www.nature.com/articles/s41467-022-28372-y#data-availability
+
+# Load required libraries
+library(Seurat)
+library(dplyr)
+
+# Load scRNA-seq data
+scRNAseq_data <- readRDS("GSM3828673_10X_GBM_IDHwt_processed_TPM.RDS")
+
+# Check if it's 10X data
+if(!identical(assayNames(scRNAseq_data), "RNA")) {
+  stop("Input data is not 10X data")
+}
+
+# Check dimensions
+cat("Number of cells in scRNAseq_data:", ncol(scRNAseq_data), "\n")
+cat("Number of genes in scRNAseq_data:", nrow(scRNAseq_data), "\n")
+
+# Load sc-ChIP-seq data
+scCHIPseq_data <- read.csv("GSM3828673_10X_GBM_chip.csv", row.names = 1)
+
+# Create Seurat object
+multiomics_data <- CreateSeuratObject(counts = scRNAseq_data, assay = "RNA", project = "multiomics_data")
+multiomics_data[["scCHIPseq"]] <- CreateAssayObject(counts = scCHIPseq_data, name = "scCHIPseq")
+
+# Quality control
+multiomics_data <- subset(multiomics_data, subset = nFeature_RNA > 200 & nFeature_RNA < 2500 & percent.mt < 10)
+
+# Normalize data
+multiomics_data <- NormalizeData(multiomics_data, normalization.method = "LogNormalize", scale.factor = 10000)
+
+# Find variable genes
+multiomics_data <- FindVariableFeatures(multiomics_data, assay = "RNA", selection.method = "vst", nfeatures = 2000)
+
+# Dimensionality reduction and clustering
+multiomics_data <- RunPCA(multiomics_data, assay = "RNA", features = VariableFeatures(object = multiomics_data))
+multiomics_data <- FindNeighbors(multiomics_data, assay = "RNA", dims = 1:10)
+multiomics_data <- FindClusters(multiomics_data, resolution = 0.6)
+
+# Find differentially expressed genes
+multiomics_data <- FindMarkers(multiomics_data, assay = "RNA", ident.1 = 0, ident.2 = 1)
+
+# Make heatmap of top 10 markers
+top10_markers <- head(multiomics_data.markers, n = 10)
+DoHeatmap(multiomics_data, features = top10_markers$gene, group.by = "RNA_snn_res.0.6", assay = "RNA", cols.use = "Viridis", draw.lines = TRUE)
+
+# Get genes uniquely DE in each cluster
+cluster_markers <- lapply(unique(multiomics_data@meta.data$RNA_snn_res.0.6), function(x) {
+  markers <- FindMarkers(multiomics_data, ident.1 = x, min.pct = 0.25, logfc.threshold = 0.25)
+  markers$gene
+})
+names(cluster_markers) <- unique(multiomics_data@meta.data$RNA_snn_res.0.6)
+
+# Merge clusters based on expression proximity
+multiomics_data <- MergeSeurat(multiomics_data, 
+                               merge.names = c("1", "2", "3"), 
+                               features.to.merge = "var.genes",
+                               add.cell.ids = c("cluster_1", "cluster_2", "cluster_3"))
+
+# Build classification hierarchy
+multiomics_data <- BuildClusterTree(multiomics_data, verbose = FALSE)
