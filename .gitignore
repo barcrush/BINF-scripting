@@ -1,1 +1,24 @@
+# Python-specific
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+*.npy
+*.npz
+*.bam
+*.bai
+*.bak
+*.fastq
+
+*.a
+*.tmp
+*.cache
+
+.DS_Store
+
+# Environment files
+*.env
+*.iml
+
 .ipynb_checkpoints/
